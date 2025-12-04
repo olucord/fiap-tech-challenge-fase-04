@@ -1,0 +1,5 @@
+{
+  "name": "Market Analytics",
+  "description": "A financial dashboard that analyzes stock tickers and provides buy/sell recommendations using AI.",
+  "requestFramePermissions": []
+}
