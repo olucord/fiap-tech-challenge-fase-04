@@ -3,7 +3,14 @@
 // =============================================
 
 // Action returned by the backend
-export type PredictionAction = "BUY" | "HOLD" | "SELL";
+export const PredictionAction = {
+  BUY: "BUY",
+  HOLD: "HOLD",
+  SELL: "SELL",
+} as const;
+
+export type PredictionAction = typeof PredictionAction[keyof typeof PredictionAction];
+
 
 // Single point of history: date + price
 export interface ChartPoint {

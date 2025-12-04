@@ -1,5 +1,6 @@
 // src/services/MarketService.ts
-import { PredictionAction, type PredictionResponse, type ChartPoint, type MetricRecord } from "../types";
+// src/services/MarketService.ts
+import type { PredictionAction, PredictionResponse, ChartPoint, MetricRecord } from "../types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || ""; // ex: http://localhost:8000
 
