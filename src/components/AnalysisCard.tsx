@@ -64,7 +64,7 @@ const AnalysisCard: React.FC<AnalysisCardProps> = ({ data }) => {
           <h3 className="text-gray-400 text-sm uppercase tracking-wider font-semibold mb-4">Key Metrics</h3>
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-fin-900/50 p-4 rounded-xl">
-              <p className="text-gray-500 text-xs">P/E Ratio</p>
+              <p className="text-gray-500 text-xs">P/ L</p>
               <p className="text-white font-mono text-xl">{data.metrics.peRatio}</p>
             </div>
             <div className="bg-fin-900/50 p-4 rounded-xl">
@@ -72,11 +72,11 @@ const AnalysisCard: React.FC<AnalysisCardProps> = ({ data }) => {
               <p className="text-white font-mono text-xl">{data.metrics.dividendYield}%</p>
             </div>
             <div className="bg-fin-900/50 p-4 rounded-xl">
-              <p className="text-gray-500 text-xs">Market Cap</p>
+              <p className="text-gray-500 text-xs">Valor de Mercado</p>
               <p className="text-white font-mono text-xl">{data.metrics.marketCap}</p>
             </div>
             <div className="bg-fin-900/50 p-4 rounded-xl">
-              <p className="text-gray-500 text-xs">Volatility</p>
+              <p className="text-gray-500 text-xs">Volatividade</p>
               <p className="text-white font-mono text-xl">{data.metrics.volatility}</p>
             </div>
           </div>
@@ -85,7 +85,7 @@ const AnalysisCard: React.FC<AnalysisCardProps> = ({ data }) => {
 
       {/* Reasoning */}
       <div className="bg-fin-800 rounded-2xl p-6 border border-fin-700 shadow-xl">
-        <h3 className="text-gray-400 text-sm uppercase tracking-wider font-semibold mb-2">Analyst Reasoning</h3>
+        <h3 className="text-gray-400 text-sm uppercase tracking-wider font-semibold mb-2">Relação de Análise</h3>
         <p className="text-gray-300 leading-relaxed">
           {data.reasoning}
         </p>
@@ -93,7 +93,7 @@ const AnalysisCard: React.FC<AnalysisCardProps> = ({ data }) => {
 
       {/* Chart Section */}
       <div className="bg-fin-800 rounded-2xl p-6 border border-fin-700 shadow-xl h-80">
-        <h3 className="text-gray-400 text-sm uppercase tracking-wider font-semibold mb-4">30-Day Trend Analysis</h3>
+        <h3 className="text-gray-400 text-sm uppercase tracking-wider font-semibold mb-4">Metricas nos ultimos 30 dias</h3>
         <div className="w-full h-full pb-6">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data.history}>
