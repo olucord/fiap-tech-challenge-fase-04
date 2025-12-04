@@ -3,11 +3,7 @@
 // =============================================
 
 // Action returned by the backend
-export enum PredictionAction {
-  BUY = "BUY",
-  HOLD = "HOLD",
-  SELL = "SELL"
-}
+export type PredictionAction = "BUY" | "HOLD" | "SELL";
 
 // Single point of history: date + price
 export interface ChartPoint {
