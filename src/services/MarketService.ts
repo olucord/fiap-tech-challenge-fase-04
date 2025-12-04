@@ -1,9 +1,7 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { MarketAnalysis, RecommendationType } from "../types";
 
-// NOTE: In a real scenario, this service would fetch from your FastAPI backend.
-// e.g., const response = await fetch(`http://localhost:8000/analyze/${ticker}`);
-// For this demo, we use Gemini to generate realistic simulation data.
+// integrar a API aqui
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
