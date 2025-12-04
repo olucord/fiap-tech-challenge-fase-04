@@ -1,84 +1,63 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { MarketAnalysis, RecommendationType } from "../types";
+// src/services/MarketService.ts
+import { PredictionAction, type PredictionResponse, type ChartPoint, type MetricRecord } from "../types";
 
-// integrar a API aqui
+const API_BASE = (import.meta.env.VITE_API_BASE as string) || ""; // ex: http://localhost:8000
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Apenas retorna a própria ação vinda do backend (BUY / SELL / HOLD)
+function mapAction(action: PredictionAction): PredictionAction {
+  return action;
+}
 
-const analysisSchema: Schema = {
-  type: Type.OBJECT,
-  properties: {
-    ticker: { type: Type.STRING },
-    companyName: { type: Type.STRING },
-    currentPrice: { type: Type.NUMBER },
-    currency: { type: Type.STRING },
-    recommendation: { type: Type.STRING, enum: ["BUY", "SELL", "HOLD"] },
-    confidenceScore: { type: Type.NUMBER, description: "Confidence score between 0 and 100" },
-    reasoning: { type: Type.STRING },
-    metrics: {
-      type: Type.OBJECT,
-      properties: {
-        peRatio: { type: Type.NUMBER },
-        dividendYield: { type: Type.NUMBER },
-        marketCap: { type: Type.STRING },
-        volatility: { type: Type.STRING },
-      },
-      required: ["peRatio", "dividendYield", "marketCap", "volatility"]
-    },
-    history: {
-      type: Type.ARRAY,
-      description: "Generate 30 data points for the last 30 days trend",
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          date: { type: Type.STRING },
-          price: { type: Type.NUMBER }
-        }
-      }
-    }
-  },
-  required: ["ticker", "companyName", "currentPrice", "recommendation", "metrics", "history", "reasoning", "confidenceScore"]
-};
+export async function analyzeTicker(ticker: string): Promise<PredictionResponse> {
+  const url = `${API_BASE}/predict/${encodeURIComponent(ticker)}`;
+  const resp = await fetch(url);
 
-export const analyzeTicker = async (ticker: string): Promise<MarketAnalysis> => {
-  try {
-    const model = "gemini-2.5-flash";
-    const prompt = `
-      Act as a senior financial analyst. Analyze the ticker "${ticker}".
-      Provide a realistic simulation of current market data, a buy/sell/hold recommendation based on typical market sentiment for this stock, 
-      and generate realistic historical price data for the last 30 days to visualize a trend.
-      
-      If the ticker is invalid or not found, make a best guess or return generic valid data for "UNKNOWN".
-      The reasoning should be concise but professional.
-    `;
-
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: analysisSchema,
-        temperature: 0.4, // Lower temperature for more consistent/realistic data
-      },
-    });
-
-    const text = response.text;
-    if (!text) throw new Error("No data returned from AI analyst.");
-
-    const rawData = JSON.parse(text);
-
-    // Ensure enum compatibility
-    let rec = RecommendationType.HOLD;
-    if (rawData.recommendation === "BUY") rec = RecommendationType.BUY;
-    if (rawData.recommendation === "SELL") rec = RecommendationType.SELL;
-
-    return {
-      ...rawData,
-      recommendation: rec,
-    } as MarketAnalysis;
-
-  } catch (error) {
-    console.error("Analysis failed:", error);
-    throw new Error("Failed to analyze market data. Please check the ticker or API key.");
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => null);
+    throw new Error(`API error ${resp.status}${text ? `: ${text}` : ""}`);
   }
-};
+
+  const data = await resp.json();
+
+  if (!data || data.error) {
+    throw new Error(data?.error || "Invalid response from API");
+  }
+
+  // History normalization — mantém formato original { Date, Close }
+  const rawHistory: Array<any> = data.history || [];
+  const history: ChartPoint[] = rawHistory.map((h) => ({
+    Date: String(h.Date ?? h.date ?? h.DateString ?? ""),
+    Close: Number(h.Close ?? h.close ?? h.price ?? 0),
+  }));
+
+  // Metrics normalization — mantém formato original MetricRecord
+  const rawMetricsArr: Array<any> = data.metrics || [];
+  const metrics: MetricRecord[] = rawMetricsArr.map((m) => ({
+    Date: String(m.Date ?? ""),
+    Open: Number(m.Open ?? 0),
+    High: Number(m.High ?? 0),
+    Low: Number(m.Low ?? 0),
+    Close: Number(m.Close ?? 0),
+    Volume: Number(m.Volume ?? 0),
+    return_1d: m.return_1d,
+    ma7: m.ma7,
+    ma21: m.ma21,
+    rsi: m.rsi,
+    volatility: m.volatility,
+    return_next: m.return_next,
+    target: m.target,
+    ticker_code: m.ticker_code,
+  }));
+
+  // Final assembled response
+  const cleanResponse: PredictionResponse = {
+    ticker: String(data.ticker ?? ticker).toUpperCase(),
+    prediction: Number(data.prediction ?? 1),
+    action: mapAction(data.action as PredictionAction),
+    message: String(data.message ?? ""),
+    history: history.slice(-30), // garante apenas últimos 30 dias
+    metrics,
+  };
+
+  return cleanResponse;
+}
