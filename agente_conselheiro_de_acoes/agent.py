@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import sqlite3
 from datetime import datetime
@@ -7,33 +8,45 @@ from mock_model import MockLSTM
 
 
 class AgenteConselheiroDeAcoes:
-    def __init__(self):
-        """
-        Inicializa o agente com arquivos de configuração e o simulador.
+    """
+    Agente responsável por analisar histórico de preços e recomendar ações financeiras.
 
-        Carrega o simulador (MockLSTM) e a política do agente (se existir).
-        Inicializa o banco de dados "memory.db".
+    Esse agente é puramente estatístico e matemático, não se baseando em fatores externos.
+    Ele utiliza um modelo LSTM para previsões e ajusta sua política de operação
+    dinamicamente com base nos erros e acertos passados (Aprendizado Adaptativo).
+
+    Attributes:
+        policy_file (str): Caminho para o arquivo de política do agente.
+        metrics_file (str): Caminho para o arquivo de métricas do agente.
+        db_file (str): Caminho para o arquivo do banco de dados SQLite do agente.
+        model (LSTM): Instância do modelo de previsão (LSTM) usado pelo agente.
+        policy (dict[str, float]): Política carregada do arquivo de configuração.
+    """
+
+    def __init__(self) -> None:
         """
-        # Configurações do agente
+        Inicializa o agente com arquivos de configuração, a LSTM e o banco de dados.
+
+        Este método carrega os arquivos de configuração (política e métricas) e inicializa a LSTM
+        e o banco de dados do agente. Caso os arquivos de configuração não existam, são criados com valores padrão.
+        """
         self.policy_file = "policy.json"
+        self.metrics_file = "metrics.json"
         self.db_file = "memory.db"
-
-        # 1. Carrega o simulador
         self.model = MockLSTM()
-
-        # 2. Carrega Política
         self.policy = self._load_policy()
-
-        # 3. Inicializa Banco de Dados
         self._init_db()
 
     def _load_policy(self) -> dict[str, float]:
         """
-        Carrega a política do agente do arquivo "policy.json" (se existir).
+        Carrega a política do agente a partir do arquivo "policy.json" (se existir).
 
-        Se o arquivo não existir, cria um com as configurações iniciais:
-        - threshold: 1% de margem para decidir comprar, vender ou manter
-        - learning_rate: 5% de ajuste para cada erro
+        O "policy.json" contém os parâmetros necessários para o correto funcionamento do agente.
+        Caso o arquivo não exista ainda, será criado um com os valores padrão:
+        - threshold: 0.01 (Limite de variação de preço para realizar uma ação)
+        - learning_rate: 0.05 (Taxa de aprendizado usada para ajustar o limiar de ação)
+        - min_threshold: 0.002 (Valor mínimo do limiar de ação)
+        - max_threshold: 0.05 (Valor máximo do limiar de ação)
 
         Returns
         -------
@@ -45,18 +58,31 @@ class AgenteConselheiroDeAcoes:
         - float: Valor da configuração
         """
         if os.path.exists(self.policy_file):
-            with open(self.policy_file, "r") as f:
-                return json.load(f)
+            try:
+                with open(self.policy_file, "r") as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                print(
+                    f"AVISO: O arquivo '{self.policy_file}' está corrompido ou vazio."
+                )
+                print(
+                    "Corrija-o e tente novamente ou apague-o para usar a política padrão."
+                )
+                raise
+            except Exception as e:
+                print(f"ERRO INESPERADO ao ler política: {e}")
+                raise
 
-        # Configuração inicial se o arquivo não existir
         default_policy = {
-            "threshold": 0.01,  # Começa exigindo 1% de margem
-            "learning_rate": 0.05,  # Ajusta 5% a cada erro
+            "threshold": 0.01,
+            "learning_rate": 0.05,
+            "min_threshold": 0.002,
+            "max_threshold": 0.05,
         }
         self._save_policy(default_policy)
         return default_policy
 
-    def _save_policy(self, policy_data=None):
+    def _save_policy(self, policy_data: dict[str, float] | None = None) -> None:
         """
         Salva a política do agente no arquivo "policy.json".
 
@@ -65,28 +91,38 @@ class AgenteConselheiroDeAcoes:
 
         Parameters
         ----------
-        policy_data : dict, optional
-            Dados da política do agente para serem salvos
+        policy_data : dict[str, float] | None
+            Dados opcionais para sobrescrever a política atual.
+            A estrutura deve ser { "nome_config" (str): valor (float) }.
+            Ex: {"threshold": 0.02}.
+            O padrão é None (apenas salva o estado atual).
         """
         if policy_data:
             self.policy = policy_data
-        with open(self.policy_file, "w") as f:
-            json.dump(self.policy, f, indent=4)
+        try:
+            with open(self.policy_file, "w") as f:
+                json.dump(self.policy, f, indent=4)
+        except Exception as e:
+            print(f"ERRO INESPERADO ao salvar política: {e}")
+            raise
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         """
         Inicializa o banco de dados "memory.db" com a tabela "history".
 
-        A tabela "history" tem as seguintes colunas:
+        Cria a tabela "history", se ela não existir ainda, com as seguintes colunas:
         - id: Identificador único da decisão (chave primária)
         - date: Data da decisão (formato "YYYY-MM-DD HH:MM:SS")
         - price_at_decision: Preço da ação no momento da decisão
         - predicted_price: Preço previsto pelo modelo
         - action: Ação tomada pelo agente (COMPRAR, VENDER ou MANTER)
         - threshold_used: Limiar de segurança utilizado na decisão
-        - outcome_evaluated: Avaliação do resultado da decisão (1 para sim, 0 para não)
+        - volatility: Variação de preço no momento da decisão
+        - learning_rate_used: Taxa de aprendizado no momento usada para ajustar o limiar do agente (threshold)
+        - real_return: Retorno real da operação dada a decisão (ganho, perda ou nulo)
+        - outcome_evaluated: Indica se a decisão foi avaliada ou não (1 para sim, 0 para não)
 
-        Se o arquivo de banco de dados não existir, cria um com a tabela "history". Se já existir, completa o banco de dados.
+        Se a tabela "history" já existir, completa o banco de dados.
         """
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
@@ -98,13 +134,18 @@ class AgenteConselheiroDeAcoes:
                 predicted_price REAL,
                 action TEXT,
                 threshold_used REAL,
+                volatility REAL, 
+                learning_rate_used REAL,
+                real_return REAL,
                 outcome_evaluated INTEGER DEFAULT 0
             )
         """)
         conn.commit()
         conn.close()
 
-    def _record_decision(self, price, pred, action):
+    def _record_decision(
+        self, price: float, pred: float, action: str, vol: float
+    ) -> None:
         """
         Registra uma decisão tomada pelo agente no banco de dados "memory.db".
 
@@ -116,26 +157,121 @@ class AgenteConselheiroDeAcoes:
             Preço previsto pelo modelo
         action : str
             Ação tomada pelo agente (COMPRAR, VENDER ou MANTER)
+        vol : float
+            Variação de preço no momento da decisão
         """
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO history (date, price_at_decision, predicted_price, action, threshold_used, outcome_evaluated)
-            VALUES (?, ?, ?, ?, ?, 0)
-        """,
+            INSERT INTO history (date, price_at_decision, predicted_price, action, threshold_used, volatility, learning_rate_used, real_return, outcome_evaluated)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 0)
+            """,
             (
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 price,
                 pred,
                 action,
                 self.policy["threshold"],
+                vol,
             ),
         )
         conn.commit()
         conn.close()
 
-    def learn(self, current_price_today) -> tuple[str, float] | tuple[None, float]:
+    def _calcular_volatilidade(self, prices: list, window: int = 5) -> float:
+        """
+        Calcula a volatilidade dos últimos cinco dias da lista de preços históricos do mercado de ações.
+
+        Parameters
+        ----------
+        prices : list
+            Lista de preços históricos
+        window : int, default=5
+            Janela de observação para calcular a volatilidade (default=5, 5 dias, segunda a sexta, observação semanal)
+
+        Returns
+        -------
+        float
+            Volatilidade do intervalo de cinco dias do mercado de ações
+        """
+        if len(prices) < window:
+            return 0.01  # Valor padrão se não tiver dados
+
+        subset = prices[-window:]
+        avg = sum(subset) / len(subset)
+        variance = sum((x - avg) ** 2 for x in subset) / (len(subset) - 1)
+        std_dev = math.sqrt(variance)
+
+        return std_dev / avg
+
+    def _atualizar_metricas(self) -> None:
+        """
+        Atualiza as métricas do agente, como a taxa de acerto (win rate) e o lucro acumulado estimado.
+
+        As métricas são salvas em um arquivo JSON chamado "metrics.json", com as seguintes chaves:
+        - ultima_atualizacao: Data e hora da última atualização nesse arquivo
+        - total_operacoes_avaliadas: Número total de operações avaliadas (compras, vendas e manter)
+        - trades_ativos: Número de trades ativos (compras e vendas)
+        - taxa_de_acerto: Taxa de acerto (win rate) do agente, em porcentagem
+        - lucro_acumulado_estimado: Lucro acumulado estimado do agente, em porcentagem
+        - threshold_atual: Nível de exigência (threshold) atual do agente
+        """
+        conn = sqlite3.connect(self.db_file)
+        cursor = conn.cursor()
+
+        # Pegando apenas trades já finalizados (avaliados) e que não foram "MANTER"
+        # (Consideramos que "MANTER" é neutro, lucro = 0)
+        cursor.execute(
+            "SELECT action, real_return FROM history WHERE outcome_evaluated = 1"
+        )
+        trades = cursor.fetchall()
+        conn.close()
+
+        total_trades = len(trades)
+        if total_trades == 0:
+            return  # Sem dados ainda
+
+        acertos = 0
+        lucro_acumulado_pct = 0.0
+
+        for action, ret in trades:
+            if action == "MANTER":
+                continue  # Ignorando trades com "MANTER" do Win Rate
+
+            # Se o retorno foi positivo, conta como acerto (podendo ser compra ou venda)
+            if ret > 0:
+                acertos += 1
+
+            # Soma simples de porcentagem
+            lucro_acumulado_pct += ret
+
+        # Win Rate (Taxa de Acerto)
+        # Filtra apenas compras e vendas para o Win Rate
+        trades_ativos = [t for t in trades if t[0] != "MANTER"]
+        win_rate = (acertos / len(trades_ativos)) if len(trades_ativos) > 0 else 0.0
+
+        metrics = {
+            "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_operacoes_avaliadas": total_trades,  # Compras, Vendas e Manter
+            "trades_ativos": len(trades_ativos),  # Compras e Vendas apenas
+            "taxa_de_acerto": round(
+                win_rate * 100, 2
+            ),  # Taxa de acerto dos trades ativos (%)
+            "lucro_acumulado_estimado": round(lucro_acumulado_pct * 100, 2),  # (%)
+            "threshold_atual": self.policy["threshold"],
+        }
+
+        try:
+            with open(self.metrics_file, "w") as f:
+                json.dump(metrics, f, indent=4)
+        except Exception as e:
+            print(f"ERRO INESPERADO ao salvar métricas: {e}")
+            print("O arquivo 'metrics.json' não foi atualizado!")
+
+    def learn(
+        self, current_price_today: float
+    ) -> tuple[str, float] | tuple[None, float]:
         """
         Aprende com a última decisão tomada pelo agente.
 
@@ -156,8 +292,6 @@ class AgenteConselheiroDeAcoes:
         """
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
-
-        # Busca última decisão para avaliação e posterior aprendizado
         cursor.execute(
             "SELECT id, action, price_at_decision FROM history WHERE outcome_evaluated = 0 ORDER BY id DESC LIMIT 1"
         )
@@ -169,38 +303,61 @@ class AgenteConselheiroDeAcoes:
 
         trade_id, action, price_yesterday = last_trade
         variacao_real = (current_price_today - price_yesterday) / price_yesterday
-        lr = self.policy["learning_rate"]
 
-        # Mensagem padrão
-        msg = "Manteve"
+        # Aposta do agente. Comprar achando que vai subir, vender achando que vai cair, manter se nenhuma das opções for verdadeira
+        lucro_trade = 0.0
+        if action == "COMPRAR":
+            lucro_trade = variacao_real  # Ganha na subida (ou perde se cair)
+        elif action == "VENDER":
+            lucro_trade = -variacao_real  # Ganha na queda (ou perde se subir)
+        else:  # MANTER, não ganha nada (pode ter custo oportunidade)
+            lucro_trade = 0.0
 
-        # Punição (Errou a direção)
+        # Se a variação foi grande, aprendemos mais rápido. Se foi pequena, ajuste fino.
+        base_lr = self.policy["learning_rate"]
+        dynamic_lr = base_lr * (1 + abs(variacao_real) * 10)
+        # Trava para o LR não explodir (fazendo com que não aprenda muito rápido)
+        dynamic_lr = min(dynamic_lr, 0.20)
+
+        msg = "Mantendo rigor. Nenhuma oportunidade encontrada."  # Comportamento padrão
+        adjusted = False  # Flag para ajuste de threshold
+
+        # Lógica de Aprendizado
         if (action == "COMPRAR" and variacao_real < 0) or (
             action == "VENDER" and variacao_real > 0
         ):
-            self.policy["threshold"] *= 1 + lr  # Fica mais rigoroso
-            msg = "Aumentou rigor (Erro de recomendação)"
+            self.policy["threshold"] *= 1 + dynamic_lr
+            msg = f"Aumentou rigor (Erro  de recomendação). dynamic_lr usado: {dynamic_lr:.4f}"
+            adjusted = True
 
-        # Correção (Perdeu oportunidade)
         elif action == "MANTER" and abs(variacao_real) > self.policy["threshold"]:
-            self.policy["threshold"] *= 1 - lr  # Fica menos rigoroso
-            msg = "Diminuiu rigor (Perdeu Oportunidade)"
+            self.policy["threshold"] *= 1 - dynamic_lr
+            msg = f"Diminuiu rigor (Perdeu Oportunidade). dynamic_lr usado: {dynamic_lr:.4f}"
+            adjusted = True
 
-        # Atualizando a política
+        # Faixa de operação do threshold (0.02 a 5%)
+        if adjusted:
+            self.policy["threshold"] = max(
+                self.policy["min_threshold"],
+                min(self.policy["max_threshold"], self.policy["threshold"]),
+            )
+
         self._save_policy()
 
-        # Marca como aprendido (outcome_evaluated será 1)
         cursor.execute(
-            "UPDATE history SET outcome_evaluated = 1 WHERE id = ?", (trade_id,)
+            "UPDATE history SET outcome_evaluated = 1, learning_rate_used = ?, real_return = ? WHERE id = ?",
+            (dynamic_lr, lucro_trade, trade_id),
         )
         conn.commit()
         conn.close()
 
+        self._atualizar_metricas()
+
         return msg, variacao_real
 
-    def decide(self, market_history) -> tuple[str, float, float]:
+    def decide(self, market_history: list) -> tuple[str, float, float]:
         """
-        Decide o que fazer com base nos dados do mercado.
+        Decide a recomendação (comprar, vender ou manter) com base nos dados do mercado.
 
         Parameters
         ----------
@@ -213,22 +370,29 @@ class AgenteConselheiroDeAcoes:
             (action, predicted_price, delta)
 
         Where:
-        - action: Ação tomada (COMPRAR, VENDER ou MANTER)
-        - predicted_price: Preço previsto pelo modelo
-        - delta: Variação entre o preço previsto e o preço atual
+        - action (str): Ação tomada (comprar, vender ou manter)
+        - predicted_price (float): Preço previsto pelo modelo
+        - delta (float): Variação entre o preço previsto e o preço atual
         """
         current_price = market_history[-1]
         predicted_price = self.model.predict(market_history)
 
+        # Calcula volatilidade dos últimos cinco dias (semanal)
+        volatility = self._calcular_volatilidade(market_history)
         delta = (predicted_price - current_price) / current_price
-        threshold = self.policy["threshold"]
 
-        # Ação padrão sempre é manter (Até que se prove o contrário)
+        # O Threshold efetivo é a política base + a sensibilidade da volatilidade
+        # Se o mercado varia 2% ao dia, exigir 1% é pouco. O agente se adapta.
+        threshold_base = self.policy["threshold"]
+        threshold_efetivo = max(threshold_base, volatility * 0.5)
+
         action = "MANTER"
-        if delta > threshold:
+        if delta > threshold_efetivo:
             action = "COMPRAR"
-        elif delta < -threshold:
+        elif delta < -threshold_efetivo:
             action = "VENDER"
 
-        self._record_decision(current_price, predicted_price, action)
+        # Registra a decisão tomada pelo agente
+        self._record_decision(current_price, predicted_price, action, volatility)
+
         return action, predicted_price, delta
